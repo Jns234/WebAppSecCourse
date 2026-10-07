@@ -1,0 +1,84 @@
+﻿# ECK creates the official containers, internal Services, credentials, and TLS.
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elastic
+  namespace: observability
+spec:
+  version: 9.5.4
+  nodeSets:
+    - name: default
+      count: 1
+      config:
+        # Local development: avoids host sysctl changes.
+        node.store.allow_mmap: false
+      podTemplate:
+        spec:
+          containers:
+            - name: elasticsearch
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 2Gi
+                limits:
+                  cpu: "2"
+                  memory: 2Gi
+      volumeClaimTemplates:
+        - metadata:
+            name: elasticsearch-data
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 5Gi
+---
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: elastic
+  namespace: observability
+spec:
+  version: 9.5.4
+  count: 1
+  elasticsearchRef:
+    name: elastic
+  config:
+    # Standalone APM Server requires the APM integration's templates/pipelines.
+    xpack.fleet.packages:
+      - name: apm
+        version: latest
+  podTemplate:
+    spec:
+      containers:
+        - name: kibana
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+apiVersion: apm.k8s.elastic.co/v1
+kind: ApmServer
+metadata:
+  name: elastic
+  namespace: observability
+spec:
+  version: 9.5.4
+  count: 1
+  elasticsearchRef:
+    name: elastic
+  kibanaRef:
+    name: elastic
+  podTemplate:
+    spec:
+      containers:
+        - name: apm-server
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi

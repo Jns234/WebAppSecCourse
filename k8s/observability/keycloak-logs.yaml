@@ -1,0 +1,86 @@
+﻿# Node-local collector: reads only Keycloak log paths; needs no Kubernetes API RBAC.
+apiVersion: beat.k8s.elastic.co/v1beta1
+kind: Beat
+metadata:
+  name: keycloak-logs
+  namespace: observability
+spec:
+  type: filebeat
+  version: 9.5.4
+  elasticsearchRef:
+    name: elastic
+  config:
+    filebeat.inputs:
+      - type: filestream
+        id: keycloak-container-logs
+        paths:
+          - /var/log/containers/keycloak-*_webappsec_keycloak-*.log
+        prospector.scanner.symlinks: true
+        prospector.scanner.fingerprint.length: 64
+        parsers:
+          - container:
+              stream: all
+              format: auto
+          - ndjson:
+              target: ""
+              expand_keys: true
+              overwrite_keys: true
+              add_error_key: true
+        processors:
+          - add_fields:
+              target: ""
+              fields:
+                service:
+                  name: keycloak
+                event:
+                  dataset: keycloak.log
+                kubernetes:
+                  namespace: webappsec
+    # Keep the default filebeat-* index/data stream and ECK-managed permissions.
+    setup.template.settings:
+      index.number_of_shards: 1
+      index.number_of_replicas: 0
+  daemonSet:
+    podTemplate:
+      spec:
+        automountServiceAccountToken: false
+        terminationGracePeriodSeconds: 30
+        containers:
+          - name: filebeat
+            securityContext:
+              # Host container logs and registry directory require root on local nodes.
+              runAsUser: 0
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+              seccompProfile:
+                type: RuntimeDefault
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 256Mi
+            volumeMounts:
+              - name: varlog
+                mountPath: /var/log
+                readOnly: true
+              - name: dockerlogs
+                mountPath: /var/lib/docker/containers
+                readOnly: true
+              - name: registry
+                mountPath: /usr/share/filebeat/data
+        volumes:
+          - name: varlog
+            hostPath:
+              path: /var/log
+              type: Directory
+          - name: dockerlogs
+            hostPath:
+              path: /var/lib/docker/containers
+              type: DirectoryOrCreate
+          - name: registry
+            hostPath:
+              path: /var/lib/webappsec-filebeat-keycloak
+              type: DirectoryOrCreate
